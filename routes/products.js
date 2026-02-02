@@ -1163,23 +1163,105 @@ let data = [
     "updatedAt": "2026-02-01T22:01:05.000Z"
   }
 ];
+// Helper function để validate số nguyên dương
+function isPositiveInteger(value) {
+  const num = Number(value);
+  return Number.isInteger(num) && num > 0;
+}
+
+// Helper function để validate số
+function isValidNumber(value) {
+  const num = Number(value);
+  return !isNaN(num) && isFinite(num);
+}
 //getall
 router.get('/', function (req, res, next) {
   let queries = req.query;
+  
+  // Xử lý title query
   let titleQ = queries.title ? queries.title : '';
-  let minPrice = queries.minPrice ? queries.minPrice : 0;
-  let maxPrice = queries.maxPrice ? queries.maxPrice : 1E6;
-  let page = queries.page ? queries.page : 1;
-  let limit = queries.limit ? queries.limit : 10;
+  
+  // Validate và xử lý minPrice
+  let minPrice = 0;
+  if (queries.minPrice) {
+    if (!isValidNumber(queries.minPrice)) {
+      return res.status(400).send({
+        "message": "minPrice must be a valid number"
+      });
+    }
+    minPrice = Number(queries.minPrice);
+  }
+  
+  // Validate và xử lý maxPrice
+  let maxPrice = 1E6;
+  if (queries.maxPrice) {
+    if (!isValidNumber(queries.maxPrice)) {
+      return res.status(400).send({
+        "message": "maxPrice must be a valid number"
+      });
+    }
+    maxPrice = Number(queries.maxPrice);
+  }
+  
+  // Kiểm tra maxPrice < minPrice
+  if (maxPrice < minPrice) {
+    return res.status(400).send({
+      "message": "maxPrice must be greater than or equal to minPrice"
+    });
+  }
+  
+  // Validate và xử lý page
+  let page = 1;
+  if (queries.page) {
+    if (!isPositiveInteger(queries.page)) {
+      return res.status(400).send({
+        "message": "page must be a positive integer"
+      });
+    }
+    page = Number(queries.page);
+  }
+  
+  // Validate và xử lý limit
+  let limit = 10;
+  if (queries.limit) {
+    if (!isPositiveInteger(queries.limit)) {
+      return res.status(400).send({
+        "message": "limit must be a positive integer"
+      });
+    }
+    limit = Number(queries.limit);
+  }
+  
   console.log(queries);
+  
+  // Filter data
   let result = data.filter(
     function (e) {
       return (!e.isDeleted) && e.title.includes(titleQ) &&
         e.price >= minPrice && e.price <= maxPrice
     }
   );
-  result = result.splice(limit * (page - 1), limit)
+  
+  // Pagination - FIX: dùng slice thay vì splice
+  result = result.slice(limit * (page - 1), limit * page);
+  
   res.send(result);
+});
+// GET product by slug
+router.get('/slug/:slug', function (req, res, next) {
+  let result = data.find(
+    function (e) {
+      return e.slug === req.params.slug && (!e.isDeleted);
+    }
+  );
+  
+  if (result) {
+    res.send(result);
+  } else {
+    res.status(404).send({
+      "message": "Product with this slug not found"
+    });
+  }
 });
 //get by ID
 router.get('/:id', function (req, res, next) {
@@ -1199,59 +1281,140 @@ router.get('/:id', function (req, res, next) {
 
 
 router.post('/', function (req, res, next) {
+  // Validate các trường bắt buộc
+  if (!req.body.title || req.body.title.trim() === '') {
+    return res.status(400).send({
+      "message": "title is required and cannot be empty"
+    });
+  }
+  
+  if (!req.body.price && req.body.price !== 0) {
+    return res.status(400).send({
+      "message": "price is required"
+    });
+  }
+  
+  // Validate price là số
+  if (!isValidNumber(req.body.price)) {
+    return res.status(400).send({
+      "message": "price must be a valid number"
+    });
+  }
+  
+  if (!req.body.description || req.body.description.trim() === '') {
+    return res.status(400).send({
+      "message": "description is required and cannot be empty"
+    });
+  }
+  
+  if (!req.body.category) {
+    return res.status(400).send({
+      "message": "category is required"
+    });
+  }
+  
+  if (!req.body.images || !Array.isArray(req.body.images) || req.body.images.length === 0) {
+    return res.status(400).send({
+      "message": "images is required and must be a non-empty array"
+    });
+  }
+  
+  // Tạo object mới
   let newObj = {
-    id: (getMaxID(data) + 1) + '',
-    title: req.body.title,
-    slug: ConvertTitleToSlug(req.body.title),
-    price: req.body.price,
-    description: req.body.description,
+    id: (getMaxID(data) + 1),
+    title: req.body.title.trim(),
+    slug: ConvertTitleToSlug(req.body.title.trim()),
+    price: Number(req.body.price),
+    description: req.body.description.trim(),
     category: req.body.category,
     images: req.body.images,
     creationAt: new Date(Date.now()),
     updatedAt: new Date(Date.now())
-  }
+  };
+  
   data.push(newObj);
   console.log(data);
-  res.send(newObj);
-  //console.log(g);
-})
+  res.status(201).send(newObj);
+});
 router.put('/:id', function (req, res, next) {
   let id = req.params.id;
   let result = data.find(
     function (e) {
-      return e.id == id;
+      return e.id == id && (!e.isDeleted);
     }
-  )
+  );
+  
   if (result) {
-    let keys = Object.keys(req.body)
-    for (const key of keys) {
-      if (result[key]) {
-        result[key] = req.body[key];
+    // Validate nếu có cập nhật title
+    if (req.body.title !== undefined) {
+      if (!req.body.title || req.body.title.trim() === '') {
+        return res.status(400).send({
+          "message": "title cannot be empty"
+        });
       }
+      result.title = req.body.title.trim();
+      result.slug = ConvertTitleToSlug(req.body.title.trim());
     }
+    
+    // Validate nếu có cập nhật price
+    if (req.body.price !== undefined) {
+      if (!isValidNumber(req.body.price)) {
+        return res.status(400).send({
+          "message": "price must be a valid number"
+        });
+      }
+      result.price = Number(req.body.price);
+    }
+    
+    // Validate nếu có cập nhật description
+    if (req.body.description !== undefined) {
+      if (!req.body.description || req.body.description.trim() === '') {
+        return res.status(400).send({
+          "message": "description cannot be empty"
+        });
+      }
+      result.description = req.body.description.trim();
+    }
+    
+    // Cập nhật các trường còn lại
+    if (req.body.category !== undefined) {
+      result.category = req.body.category;
+    }
+    
+    if (req.body.images !== undefined) {
+      if (!Array.isArray(req.body.images) || req.body.images.length === 0) {
+        return res.status(400).send({
+          "message": "images must be a non-empty array"
+        });
+      }
+      result.images = req.body.images;
+    }
+    
+    result.updatedAt = new Date(Date.now());
+    
     res.send(result);
   } else {
     res.status(404).send({
       "message": "id not found"
     });
   }
-})
+});
 router.delete('/:id', function (req, res, next) {
   let id = req.params.id;
   let result = data.find(
     function (e) {
-      return e.id == id;
+      return e.id == id && (!e.isDeleted);
     }
-  )
+  );
+  
   if (result) {
     result.isDeleted = true;
-    res.send(result)
+    res.send(result);
   } else {
     res.status(404).send({
       "message": "id not found"
     });
   }
-
-})
+});
 
 module.exports = router;
